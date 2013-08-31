@@ -2,6 +2,10 @@ var root = new Firebase('ssspppaaaccceee.firebaseio.com')
 
 var width = 640, height = 480;
 var size = 10
+var k = 1000
+var drag = 0.99
+var friction = 0.5
+var boost = 5
 
 var canvas = document.getElementById('canvas')
 canvas.width = width;
@@ -9,7 +13,7 @@ canvas.height = height;
 var g = canvas.getContext('2d')
 
 function joinGame() {
-    var gameRef, isServer
+    var gameRef, us
     root.child('waiting').transaction(function(gameUrl) {
         if (gameUrl === null) {
             // There is nobody waiting, so create a game and tell everybody
@@ -17,165 +21,113 @@ function joinGame() {
             root.child('games').remove()   // Temporary for development purposes.
             gameRef = root.child('games').push()
             newGameUrl = gameRef.toString()
-            isServer = true
+            us = 'player1'
 
             return newGameUrl
         } else {
             // There's somebody waiting, so join their game.
             gameRef = new Firebase(gameUrl)
-            isServer = false
+            us = 'player2'
 
             return null
         }
     },
     function(error, committed, snapshot) {
         if (!error && committed) {
-            console.log('server', isServer)
-            if (isServer)
-                server(gameRef)
-            else
-                client(gameRef)
+            var them = us === 'player1' ? 'player2' : 'player1'
+            console.log(gameRef, us, them)
+            startGame(gameRef, us, them)
+        } else {
+            console.log('error', error, 'committed', committed, 'snapshot', snapshot)
         }
     })
-
-    // TODO: Should probably be a transaction.
-    /*root.child('waiting').once('value', function(snapshot) {
-        if (snapshot.val() === null) {
-            var gameRef = root.child('games').push()
-            root.child('waiting').set(gameRef.toString())
-
-            server(gameRef)
-        } else {
-            var gameRef = root.child('games').child(snapshot.val())
-            root.child('waiting').remove()
-
-            client(gameRef)
-        }
-    })*/
 }
 
-/*function server(gameRef) {
-    var width = 640, height = 480;
-    var size = 10
-    var k = 1000
-    var drag = 0.99
-    var friction = 0.5
-
-    var canvas = document.getElementById('canvas')
-    canvas.width = width;
-    canvas.height = height;
-    var g = canvas.getContext('2d')
-
-    var x = width / 2, y = width / 2, dx = 0, dy = 0, mouseX = x, mouseY = y, mouseDown = false
-    setInterval(function() {
-        if (true || mouseDown) {
-            dx += (mouseX - x) / k
-            dy += (mouseY - y) / k
-        }
-
-        dx *= drag
-        dy *= drag
-
-        x += dx
-        y += dy
-
-        if (x > width) dx = -Math.abs(dx) * friction
-        if (x < 0) dx = Math.abs(dx) * friction
-        if (y > height) dy = -Math.abs(dy) * friction
-        if (y < 0) dy = Math.abs(dy) * friction
-
-        g.fillStyle = '#000'
-        g.fillRect(0, 0, width, height)
-        g.fillStyle = '#f00'
-        g.fillRect(x - size, y - size, size, size)
-    }, 1000 / 60)
-
-    canvas.onmousemove = function(e) {
-        mouseX = e.pageX - canvas.offsetLeft
-        mouseY = e.pageY - canvas.offsetTop
+function startGame(gameRef, us, them) {
+    // Initial state.
+    var state = {
+        player1: {x: width / 2, y: height / 2, dx: 0, dy: 0, color: '#00f'},
+        player2: {x: width / 4, y: height / 4, dx: 0, dy: 0, color: '#f00'}
     }
-    canvas.onmousedown = function(e) { mouseDown = true }
-    canvas.onmouseup = function(e) { mouseDown = false }
-    document.onkeypress = function(e) {
-        var key = String.fromCharCode(e.which)
-        var boost = 5
-        if (key === "w" || key === "W")
-            dy = -boost
-        else if (key === "a" || key === "A")
-            dx = -boost
-        else if (key === "s" || key === "S")
-            dy = boost
-        else if (key === "d" || key === "D")
-            dx = boost
-    }
-}*/
+    var mouseX = width / 2, mouseY = height / 2
 
-function server(gameRef) {
-    gameRef.child('state').set({
-        client: {x: width / 4, y: height / 4, color: '#f00'},
-        server: {x: width / 2, y: height / 2, color: '#00f'}
-    })
-
-    var k = 1000
-    var drag = 0.99
-    var friction = 0.5
-    var x = width / 2, y = width / 2
-    var dx = 0, dy = 0
-    var mouseX = x, mouseY = y, mouseDown = false
     setInterval(function() {
-        if (true || mouseDown) {
-            dx += (mouseX - x) / k
-            dy += (mouseY - y) / k
-        }
-
-        dx *= drag
-        dy *= drag
-
-        x += dx
-        y += dy
-
-        if (x > width) dx = -Math.abs(dx) * friction
-        if (x < 0) dx = Math.abs(dx) * friction
-        if (y > height) dy = -Math.abs(dy) * friction
-        if (y < 0) dy = Math.abs(dy) * friction
+        // Move ourself towards the mouse in proportion to how far away they
+        // are from the mouse (the farther we are from the mouse, the faster we
+        // move towards it).
+        state[us].dx += (mouseX - state[us].x) / k
+        state[us].dy += (mouseY - state[us].y) / k
 
         // Clear screen.
         g.fillStyle = '#000'
         g.fillRect(0, 0, width, height)
 
-        // Draw player.
-        g.fillStyle = '#000'
-        g.fillRect(0, 0, width, height)
-        g.fillStyle = '#f00'
-        g.fillRect(x - size, y - size, size, size)
+        // For each player:
+        for (player in state) {
+            if (state.hasOwnProperty(player)) {
+                with (state[player]) {
+                    // Slow player down a little bit over time.
+                    dx *= drag
+                    dy *= drag
 
-        // Send updated state.
-        gameRef.child('state').child('server').set({
-            x: x, y: y, color: '#00f'
-        })
+                    // Move player.
+                    x += dx
+                    y += dy
+
+                    // TODO: collision detection.
+
+                    // Keep player in bounds by making them bounce off walls,
+                    // reducing their speed a little bit.
+                    if (x > width) dx = -Math.abs(dx) * friction
+                    if (x < 0) dx = Math.abs(dx) * friction
+                    if (y > height) dy = -Math.abs(dy) * friction
+                    if (y < 0) dy = Math.abs(dy) * friction
+
+                    // Draw player.
+                    g.fillStyle = color
+                    g.fillRect(x - size, y - size, size, size)
+                }
+            }
+        }
     }, 1000 / 60)
 
+    setInterval(function() {
+        // Publish our current state every once in a while so that other player
+        // can see it.
+        gameRef.child(us).set(state[us])
+    }, 100)
+
+    // When the other player publishes their state, copy it into our state.
+    gameRef.child(them).on('value', function(snapshot) {
+        if (snapshot.val() !== null)
+            state[them] = snapshot.val()
+    })
+
+    /*if (us == 'player2') {
+        gameRef.child(us).on('value', function(snapshot) {
+            if (snapshot.val() !== null)
+                state[us] = snapshot.val()
+        })
+    }*/
+
     canvas.onmousemove = function(e) {
+        // Keep track of the mouse position.
         mouseX = e.pageX - canvas.offsetLeft
         mouseY = e.pageY - canvas.offsetTop
     }
-    canvas.onmousedown = function(e) { mouseDown = true }
-    canvas.onmouseup = function(e) { mouseDown = false }
     document.onkeypress = function(e) {
+        // Pressing one of the directional keys "boosts" the player by giving
+        // it a constant speed in that direction, instantly nullifying its
+        // previous speed in that direction.
         var key = String.fromCharCode(e.which)
-        var boost = 5
-        if (key === "w" || key === "W")
-            dy = -boost
-        else if (key === "a" || key === "A")
-            dx = -boost
-        else if (key === "s" || key === "S")
-            dy = boost
-        else if (key === "d" || key === "D")
-            dx = boost
+        if (key === "w" || key === "W") state[us].dy = -boost
+        else if (key === "a" || key === "A") state[us].dx = -boost
+        else if (key === "s" || key === "S") state[us].dy = boost
+        else if (key === "d" || key === "D") state[us].dx = boost
     }
 }
 
-function client(gameRef) {
+/*function client(gameRef) {
     var lastStateTime = Date.now()
     var total = 0, count = 0
     gameRef.child('state').on('value', function(snapshot) {
@@ -219,4 +171,4 @@ function client(gameRef) {
         if (['w', 'W', 'a', 'A', 's', 'S', 'd', 'D'].indexOf(key) >= 0)
             input.set({type: 'keypress', key: key})
     }
-}
+}*/
