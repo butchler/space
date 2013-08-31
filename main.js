@@ -1,11 +1,13 @@
 var root = new Firebase('ssspppaaaccceee.firebaseio.com')
 
-var width = 640, height = 480;
-var size = 10
-var k = 1000
-var drag = 0.99
-var friction = 0.5
-var boost = 5
+var width = 640, height = 480;   // Canvas size.
+var size = 20                    // Player size.
+var attractionDamping = 0.001    // Constant of proportionality for mouse attraction.
+var drag = 0.99                  // Drag from "air friction" (I thought we were in space?)
+var friction = 0.5               // "Friction" from hitting a wall.
+var boost = 5                    // Speed you receive when you "boost".
+var fps = 60                     // Frames per second.
+var networkDelay = 100           // Milliseconds between network updates.
 
 var canvas = document.getElementById('canvas')
 canvas.width = width;
@@ -83,8 +85,8 @@ function startGame(gameRef, us) {
             // are from the mouse (the farther we are from the mouse, the faster we
             // move towards it).
             var our = state[us]
-            our.dx += (mouseX - our.x) / k
-            our.dy += (mouseY - our.y) / k
+            our.dx += (mouseX - our.x) * attractionDamping
+            our.dy += (mouseY - our.y) * attractionDamping
 
             // Clear screen.
             g.fillStyle = '#000'
@@ -127,11 +129,12 @@ function startGame(gameRef, us) {
                                 var p = state[player], o = state[otherPlayer]
                                 if (p.x < o.x + size && p.x + size > o.x &&
                                     p.y < o.y + size && p.y + size > o.y) {
-                                    // Crazy stuff!
-                                    state[player].dx *= -(1 + Math.random())
-                                    state[player].dy *= -(1 + Math.random())
-                                    state[otherPlayer].dx *= -(1 + Math.random())
-                                    state[otherPlayer].dy *= -(1 + Math.random())
+                                    // Crazy/stupid collision handling!
+                                    var k = 1 + 2*Math.random()
+                                    state[player].dx *= -k
+                                    state[player].dy *= -k
+                                    state[otherPlayer].dx *= -k
+                                    state[otherPlayer].dy *= -k
 
                                     // Immediately publish states when two players collide.
                                     gameRef.child(player).set(state[player])
@@ -142,13 +145,13 @@ function startGame(gameRef, us) {
                     }
                 }
             }
-        }, 1000 / 60)
+        }, 1000 / fps)
 
         setInterval(function() {
             // Publish our current state every once in a while so that other
             // players can see it.
             gameRef.child(us).set(state[us])
-        }, 100)
+        }, networkDelay)
 
         // When the other players publish their states, copy it into our state.
         gameRef.on('value', function(snapshot) {
