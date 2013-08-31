@@ -79,11 +79,10 @@ function startGame(gameRef, us) {
 
         // Every frame:
         setInterval(function() {
-            our = state[us]
-
             // Move ourself towards the mouse in proportion to how far away they
             // are from the mouse (the farther we are from the mouse, the faster we
             // move towards it).
+            var our = state[us]
             our.dx += (mouseX - our.x) / k
             our.dy += (mouseY - our.y) / k
 
@@ -158,27 +157,9 @@ function startGame(gameRef, us) {
                 state = snapshot.val()
                 state[us] = ourState
             }
-
-            // If the host disappeared, try to become the host.
-            if (!state.hasOwnProperty('host')) {
-                console.log('host disappeared', state)
-
-                gameRef.transaction(function(newState) {
-                    newState['host'] = us
-                    delete newState[us]
-                }, function(error, committed, snapshot) {
-                    if (!error && committed) {
-                        console.log('became host')
-                        us = 'host'
-                    } else {
-                        console.log('error', error, 'committed', committed, 'snapshot', snapshot.val())
-                    }
-                })
-            }
         })
 
         window.onunload = function(e) {
-            // TODO: Make into a transaction.
             gameRef.child(us).remove()
         }
 
@@ -201,49 +182,3 @@ function startGame(gameRef, us) {
         }
     })
 }
-
-/*function client(gameRef) {
-    var lastStateTime = Date.now()
-    var total = 0, count = 0
-    gameRef.child('state').on('value', function(snapshot) {
-        var currentTime = Date.now()
-        total += currentTime - lastStateTime
-        count += 1
-        console.log('current', currentTime - lastStateTime, 'average', total / count)
-
-        var state = snapshot.val()
-
-        // Clear screen.
-        g.fillStyle = '#000'
-        g.fillRect(0, 0, width, height)
-
-        // Draw players.
-        for (player in state) {
-            if (state.hasOwnProperty(player)) {
-                var p = state[player]
-                g.fillStyle = p.color
-                g.fillRect(p.x - size, p.y - size, size, size)
-            }
-        }
-
-        lastStateTime = currentTime
-    })
-
-    var input = gameRef.child('clientInput')
-    canvas.onmousemove = function(e) {
-        var mouseX = e.pageX - canvas.offsetLeft
-        var mouseY = e.pageY - canvas.offsetTop
-        input.set({type: 'mousemove', x: mouseX, y: mouseY})
-    }
-    canvas.onmousedown = function(e) {
-        input.set({type: 'mousedown', down: true})
-    }
-    canvas.onmousedown = function(e) {
-        input.set({type: 'mousedown', down: false})
-    }
-    canvas.onkeypress = function(e) {
-        var key = String.fromCharCode(e.which)
-        if (['w', 'W', 'a', 'A', 's', 'S', 'd', 'D'].indexOf(key) >= 0)
-            input.set({type: 'keypress', key: key})
-    }
-}*/
