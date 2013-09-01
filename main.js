@@ -108,7 +108,6 @@ function movePlayer(player) {
 
 function drawPlayer(player) {
     g.fillStyle = player.color
-    //g.fillRect(player.x, player.y, size, size)
     g.beginPath()
     g.arc(player.x, player.y, size, 0, 2 * Math.PI, false)
     g.fill()
@@ -141,28 +140,17 @@ function handleCollisions(gameRef, state) {
 
                     // If circles overlap:
                     if (magnitude(p.x - o.x, p.y - o.y) < size * 2) {
-                        // Crazy/stupid collision handling!
-                        /*var k = 1 + 2*Math.random()
-                        p.dx *= -k; p.dy *= -k
-                        o.dx *= -k; o.dy *= -k*/
-
-                        // Represents direction from otherPlayer to player, or
-                        // the alternatively the direction from player away
-                        // from otherPlayer.
+                        // away represents the direction away from otherPlayer,
+                        // starting from player, as a normal vector.
                         var away = normal(p.x - o.x, p.y - o.y)
                         var centerX = (p.x + o.x) / 2, centerY = (p.y + o.y) / 2
                         p.x = centerX + away.x * size; p.y = centerY + away.y * size;
                         o.x = centerX - away.x * size; o.y = centerY - away.y * size;
-                        k = 5
+                        var k = 5
                         p.dx += k * away.x; p.dy += k * away.y
                         o.dx -= k * away.x; o.dy -= k * away.y
 
-                        /*var k = 5
-                        o.dx *= k * n.x; o.dy *= k * n.y
-                        p.dx *= -k * n.x; p.dy *= -k * n.y*/
-
                         // Immediately publish states when two players collide.
-                        // TODO: Use update instead of set so that only one network update is sent.
                         newStates = {}
                         newStates[player] = p
                         newStates[player].overwriteLocal = true
@@ -173,14 +161,6 @@ function handleCollisions(gameRef, state) {
                 }
             }
         }
-    }
-}
-
-function catchUp(state, player) {
-    var numFrames = (networkDelay / 2) / frameDelay
-    for (var i = 0; i < numFrames; i++) {
-        movePlayer(state[player])
-        // TODO: If we are host, handle collisions?
     }
 }
 
@@ -226,13 +206,9 @@ function startGame(gameRef, us) {
         //setInterval(function() { gameRef.child(us).set(state[us]) }, networkDelay)
         setInterval(function() {
             gameRef.child(us).transaction(function(remoteState) {
-                /*if (remoteState.overwrite)
-                    return
-                return state[us]*/
                 if (remoteState.overwriteLocal) {
                     our = state[us] = remoteState
                     delete our.overwriteLocal
-                    catchUp(state, us)
                 }
 
                 return state[us]
@@ -256,18 +232,8 @@ function startGame(gameRef, us) {
             var player = childSnapshot.name()
 
             var newPlayerState = childSnapshot.val()
-            /*if (player !== us || newPlayerState.overwrite) {
+            if (player !== us)
                 state[player] = newPlayerState
-                if (player === us) {
-                    our = state[player]
-                    delete our.overwrite
-                    gameRef.child(us).set(our)
-                }
-            }*/
-            if (player !== us) {
-                state[player] = newPlayerState
-                catchUp(state, player)
-            }
         })
         gameRef.on('child_removed', function(oldChildSnapshot) {
             var player = oldChildSnapshot.name()
@@ -285,7 +251,7 @@ function startGame(gameRef, us) {
             our.mouseY = e.pageY - canvas.offsetTop
         }
         document.onkeypress = function(e) {
-             // Pressing one of the directional keys "boosts" the player by giving
+            // Pressing one of the directional keys "boosts" the player by giving
             // it a constant speed in that direction, instantly nullifying its
             // previous speed in that direction.
             var key = String.fromCharCode(e.which)
