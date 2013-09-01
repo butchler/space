@@ -1,5 +1,4 @@
-var root = new Firebase('ssspppaaaccceee.firebaseio.com')
-
+// Constants
 var width = 800, height = 400    // Canvas size.
 var size = 20                    // Player size.
 var attractionDamping = 0.001    // Constant of proportionality for mouse attraction.
@@ -7,9 +6,13 @@ var drag = 0.99                  // Drag from "air friction" (I thought we were 
 var friction = 0.5               // "Friction" from hitting a wall.
 var boost = 5                    // Speed you receive when you "boost".
 var fps = 60                     // Frames per second.
-var networkDelay = 200           // Milliseconds between network updates.
+var networkDelay = 300           // Milliseconds between network updates.
 var frameDelay = 1000 / fps
 
+// Connect to Firebase.
+var root = new Firebase('ssspppaaaccceee.firebaseio.com')
+
+// Initialize canvas.
 var canvas = document.getElementById('canvas')
 canvas.width = width
 canvas.height = height
@@ -20,68 +23,83 @@ function makeGame() {
 }
 
 function joinGame(id) {
-    console.log('joinGame', id)
-
     var gameRef = root.child('games').child(id)
-    gameRef.once('value', function(snapshot) {
-        if (snapshot.val() === null) {
-            // A game with this id hasn't been made yet, so we get to make it and be the host.
-            startGame(gameRef, 'host')
-        } else {
-            // Join the game.
-            startGame(gameRef, gameRef.child('states').push().name())
-        }
-    })
+    var playerId = gameRef.push().name()
+    startGame(gameRef, playerId)
+
+    console.log('joinGame', id, playerId)
 }
 
 // Get the initial game state and add ourselves to it.
-function initPlayer(gameRef, us, doneCallback) {
-    gameRef.child('host-states').once('value', function(snapshot) {
-        var state = snapshot.val()
+function initPlayerState(gameRef, us, doneCallback) {
+    gameRef.transaction(function(state) {
         if (state === null)
             state = {}
 
         // Determine what our color should be.
         var colors = ['blue', 'red', 'green', 'purple', 'yellow', 'magenta', 'cyan']
-        var numColors = colors.length
-        var numPlayers = 0
         for (player in state) {
             if (state.hasOwnProperty(player)) {
-                numPlayers += 1
-
                 var index = colors.indexOf(state[player].color)
                 if (index >= 0)
                     delete colors[index]
             }
         }
-        console.log('numPlayers', numPlayers)
 
-        // TODO: Determining if there are too many players should be done in a
-        // transaction, in case multiple players join at the same time.
-        if (numPlayers >= numColors) {
+        // Find the first color that wasn't deleted.
+        var color = null
+        for (i in colors) {
+            if (colors.hasOwnProperty(i)) {
+                color = colors[i]
+                break
+            }
+        }
+
+        if (color === null) {
+            // All of the colors are already taken, so we can't join.
             console.log("Too many players in game to join.")
             return
         }
 
-        // Find the first color that wasn't deleted.
-        for (i in colors) {
-            if (colors.hasOwnProperty(i)) {
-                var color = colors[i]
-                break
-            }
-        }
-        console.log('color', color)
-
+        // Add our initial state to the game state.
         state[us] = {
             x: width / 2, y: height / 2,
             dx: 0, dy: 0,
             color: color
         }
 
-        console.log('state', state)
-
-        doneCallback(state)
+        return state
+    }, function(error, committed, snapshot) {
+        if (!error && committed) {
+            var state = snapshot.val()
+            console.log('initial state', state)
+            doneCallback(state)
+        } else {
+            console.log('error', error, 'committed', committed, 'snapshot', snapshot)
+        }
     })
+}
+
+function movePlayer(player) {
+    // Move player.
+    player.x += player.dx
+    player.y += player.dy
+
+    // Slow player down a little bit over time.
+    player.dx *= drag
+    player.dy *= drag
+
+    // Keep player in bounds by making them bounce off walls,
+    // reducing their speed a little bit.
+    if (player.x > width) player.dx = -Math.abs(player.dx) * friction
+    if (player.x < 0) player.dx = Math.abs(player.dx) * friction
+    if (player.y > height) player.dy = -Math.abs(player.dy) * friction
+    if (player.y < 0) player.dy = Math.abs(player.dy) * friction
+}
+
+function drawPlayer(player) {
+    g.fillStyle = player.color
+    g.fillRect(player.x, player.y, size, size)
 }
 
 // gameRef is a Firebase reference to the game state, and us is a string
@@ -89,7 +107,14 @@ function initPlayer(gameRef, us, doneCallback) {
 function startGame(gameRef, us) {
     console.log('startGame', gameRef.toString(), us)
 
-    initPlayer(gameRef, us, function(state) {
+    var host = us
+    gameRef.on('child_added', function(childSnapshot, prevChildName) {
+        var isFirstChild = prevChildName === null
+        if (isFirstChild)
+            host = childSnapshot.name()
+    })
+
+    initPlayerState(gameRef, us, function(state) {
         var mouseX = width / 2, mouseY = height / 2
 
         // Every frame:
@@ -108,38 +133,21 @@ function startGame(gameRef, us) {
             // For each player:
             for (player in state) {
                 if (state.hasOwnProperty(player)) {
-                    with (state[player]) {
-                        // Move player.
-                        x += dx
-                        y += dy
-
-                        // Slow player down a little bit over time.
-                        dx *= drag
-                        dy *= drag
-
-                        // Keep player in bounds by making them bounce off walls,
-                        // reducing their speed a little bit.
-                        if (x > width) dx = -Math.abs(dx) * friction
-                        if (x < 0) dx = Math.abs(dx) * friction
-                        if (y > height) dy = -Math.abs(dy) * friction
-                        if (y < 0) dy = Math.abs(dy) * friction
-
-                        // Draw player.
-                        g.fillStyle = color
-                        g.fillRect(x, y, size, size)
-                    }
+                    movePlayer(state[player])
+                    drawPlayer(state[player])
                 }
             }
 
             // Collision detection. The only actual privilege that the host
             // has is that they are the only one that does collision handling.
-            if (us === 'host') {
+            if (us === host) {
                 // For every pair of players:
                 for (player in state) {
                     if (state.hasOwnProperty(player)) {
                         for (otherPlayer in state) {
                             if (state.hasOwnProperty(otherPlayer) && player !== otherPlayer) {
                                 var p = state[player], o = state[otherPlayer]
+                                // If squares overlap:
                                 if (p.x < o.x + size && p.x + size > o.x &&
                                     p.y < o.y + size && p.y + size > o.y) {
                                     // Crazy/stupid collision handling!
@@ -148,7 +156,8 @@ function startGame(gameRef, us) {
                                     o.dx *= -k; o.dy *= -k
 
                                     // Immediately publish states when two players collide.
-                                    gameRef.child('host-states').set(state)
+                                    gameRef.child(player).set(p)
+                                    gameRef.child(otherPlayer).set(o)
                                 }
                             }
                         }
@@ -160,43 +169,32 @@ function startGame(gameRef, us) {
         setInterval(function() {
             // Publish our current state every once in a while so that other
             // players can see it.
-            if (us === 'host')
-                gameRef.child('host-states').set(state)
-            gameRef.child('states').child(us).set(state[us])
+            gameRef.child(us).set(state[us])
         }, networkDelay)
 
         // When the other players publish their states, copy it into our state.
-        if (us === 'host')
-            var otherStates = gameRef.child('states')
-        else
-            var otherStates = gameRef.child('host-states')
-        otherStates.on('value', function(snapshot) {
+        gameRef.on('value', function(snapshot) {
             if (snapshot.val() !== null) {
-                ourState = state[us]
+                //ourState = state[us]
                 state = snapshot.val()
-                state[us] = ourState
+                //state[us] = ourState
+
                 // Do client side prediction here.
-                // However, rather than overwriting the state, corrections
-                // should only occur if the remote and local states differ
-                // significantly enough, right?
-                // Half wrong. Client side prediction should only be done for
-                // the client, not the other players. However, it should only
-                // be done when there's a significant difference.
-                //
                 // var numFrames = networkDelay / frameDelay
-                // if (large difference in local and remote state)
+                // if (large enough difference in local and remote state)
                 //     simulate numFrames frames for the client's player
+                var numFrames = networkDelay / frameDelay / 2
+                for (var i = 0; i < numFrames; i++) {
+                    for (player in state) {
+                        if (state.hasOwnProperty(player)) {
+                            movePlayer(state[player])
+                        }
+                    }
+                }
             }
         })
 
-        /*window.onunload = function(e) {
-            gameRef.child('states').child(us).remove()
-        }*/
-        gameRef.child('states').child(us).onDisconnect().remove()
-        if (us === 'host')
-            gameRef.child('host-states').onDisconnect().remove()
-
-        setInterval(function() { console.log('state', state) }, 10 * 1000)
+        gameRef.child(us).onDisconnect().remove()
 
         canvas.onmousemove = function(e) {
             // Keep track of the mouse position.
