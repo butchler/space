@@ -1,0 +1,22 @@
+* Switch to circles and add proper collision handling.
+* Make a true host. The host would receive all of the state updates from the
+  other players, and only send one state update out containing all of the
+  players' states. This would limit the number of messages sent for all of the
+  players other than the host, potentially reducing lag.
+* Add interpolation.
+* Increase canvas size?
+* Fix color choosing bug.
+  * Color choosing should probably be in a transaction so two players don't get
+    the same color.
+* Fix improper exit on refresh bug.
+* Switch to a pure client-server model. This may be better suited for this
+  particular control scheme because there is inherently a feeling of lag in the
+  way you move with the mouse, so that may be enough to hide the actual lag in
+  the network.
+* Switch to a pure peer-to-peer model. Each player would have to wait for the
+  input from all the other players before calculating the next frame. This
+  might be suitable for the same reasons as the pure client-server model.
+* Switch to a democratic system. Basically, that just means a pure peer-to-peer
+  model, but rather than ensuring that there are never any conflicts by waiting
+  for each users input before calculating next frame, it allows conflicts but
+  handles them by looking at what most of the players think happened.
