@@ -1,6 +1,6 @@
 // Constants
 var width = 700, height = 500    // Canvas size.
-var size = 20                    // Player size.
+var size = 15                    // Player size.
 var attractionDamping = 0.001    // Constant of proportionality for mouse attraction.
 var drag = 0.99                  // Drag from "air friction" (I thought we were in space?)
 var friction = 0.5               // "Friction" from hitting a wall.
@@ -108,29 +108,67 @@ function movePlayer(player) {
 
 function drawPlayer(player) {
     g.fillStyle = player.color
-    g.fillRect(player.x, player.y, size, size)
+    //g.fillRect(player.x, player.y, size, size)
+    g.beginPath()
+    g.arc(player.x, player.y, size, 0, 2 * Math.PI, false)
+    g.fill()
+}
+
+function magnitude(x, y) {
+    return Math.sqrt(x*x + y*y)
+}
+
+function normal(x, y) {
+    var mag = magnitude(x, y)
+    return {
+        x: x / mag,
+        y: y / mag
+    }
 }
 
 function handleCollisions(gameRef, state) {
     // For every pair of players:
+    var seen = {}
     for (player in state) {
         if (state.hasOwnProperty(player)) {
             for (otherPlayer in state) {
-                if (state.hasOwnProperty(otherPlayer) && player !== otherPlayer) {
+                if (state.hasOwnProperty(otherPlayer) &&
+                        player !== otherPlayer && !seen[player + otherPlayer]) {
+                    seen[player + otherPlayer] = true
+                    seen[otherPlayer + player] = true
+
                     var p = state[player], o = state[otherPlayer]
 
-                    // If squares overlap:
-                    if (p.x < o.x + size && p.x + size > o.x &&
-                        p.y < o.y + size && p.y + size > o.y) {
+                    // If circles overlap:
+                    if (magnitude(p.x - o.x, p.y - o.y) < size * 2) {
                         // Crazy/stupid collision handling!
-                        var k = 1 + 2*Math.random()
+                        /*var k = 1 + 2*Math.random()
                         p.dx *= -k; p.dy *= -k
-                        o.dx *= -k; o.dy *= -k
+                        o.dx *= -k; o.dy *= -k*/
+
+                        // Represents direction from otherPlayer to player, or
+                        // the alternatively the direction from player away
+                        // from otherPlayer.
+                        var away = normal(p.x - o.x, p.y - o.y)
+                        var centerX = (p.x + o.x) / 2, centerY = (p.y + o.y) / 2
+                        p.x = centerX + away.x * size; p.y = centerY + away.y * size;
+                        o.x = centerX - away.x * size; o.y = centerY - away.y * size;
+                        k = 5
+                        p.dx += k * away.x; p.dy += k * away.y
+                        o.dx -= k * away.x; o.dy -= k * away.y
+
+                        /*var k = 5
+                        o.dx *= k * n.x; o.dy *= k * n.y
+                        p.dx *= -k * n.x; p.dy *= -k * n.y*/
 
                         // Immediately publish states when two players collide.
                         // TODO: Use update instead of set so that only one network update is sent.
-                        gameRef.child(player).set(p)
-                        gameRef.child(otherPlayer).set(o)
+                        newStates = {}
+                        newStates[player] = p
+                        newStates[player].overwrite = true
+                        newStates[otherPlayer] = o
+                        newStates[otherPlayer].overwrite = true
+                        gameRef.update(newStates)
                     }
                 }
             }
@@ -169,8 +207,8 @@ function startGame(gameRef, us) {
                 }
             }
 
-            // The only actual privilege that the host has is that they are the
-            // only one that does collision handling.
+            // The only actual privilege the host has is that they are the only
+            // one that does collision handling.
             if (us === host)
                 handleCollisions(gameRef, state)
         }, frameDelay)
@@ -195,12 +233,14 @@ function startGame(gameRef, us) {
         gameRef.on('child_changed', function(childSnapshot, prevChildName) {
             var player = childSnapshot.name()
 
-            if (player === us)
-                // Ignore local updates.
-                return
-
             var newPlayerState = childSnapshot.val()
-            state[player] = newPlayerState
+            if (player !== us || newPlayerState.overwrite) {
+                state[player] = newPlayerState
+                if (player === us) {
+                    our = state[player]
+                    delete our.overwrite
+                }
+            }
         })
         gameRef.on('child_removed', function(oldChildSnapshot) {
             var player = oldChildSnapshot.name()
