@@ -1,17 +1,18 @@
 var root = new Firebase('ssspppaaaccceee.firebaseio.com')
 
-var width = 640, height = 480;   // Canvas size.
+var width = 800, height = 400    // Canvas size.
 var size = 20                    // Player size.
 var attractionDamping = 0.001    // Constant of proportionality for mouse attraction.
 var drag = 0.99                  // Drag from "air friction" (I thought we were in space?)
 var friction = 0.5               // "Friction" from hitting a wall.
 var boost = 5                    // Speed you receive when you "boost".
 var fps = 60                     // Frames per second.
-var networkDelay = 100           // Milliseconds between network updates.
+var networkDelay = 200           // Milliseconds between network updates.
+var frameDelay = 1000 / fps
 
 var canvas = document.getElementById('canvas')
-canvas.width = width;
-canvas.height = height;
+canvas.width = width
+canvas.height = height
 var g = canvas.getContext('2d')
 
 function makeGame() {
@@ -42,27 +43,39 @@ function initPlayer(gameRef, us, doneCallback) {
 
         // Determine what our color should be.
         var colors = ['blue', 'red', 'green', 'purple', 'yellow', 'magenta', 'cyan']
+        var numColors = colors.length
         var numPlayers = 0
         for (player in state) {
             if (state.hasOwnProperty(player)) {
                 numPlayers += 1
+
+                var index = colors.indexOf(state[player].color)
+                if (index >= 0)
+                    delete colors[index]
             }
         }
         console.log('numPlayers', numPlayers)
 
         // TODO: Determining if there are too many players should be done in a
         // transaction, in case multiple players join at the same time.
-        if (numPlayers >= colors.length) {
+        if (numPlayers >= numColors) {
             console.log("Too many players in game to join.")
             return
         }
 
-        console.log('color', colors[numPlayers])
+        // Find the first color that wasn't deleted.
+        for (i in colors) {
+            if (colors.hasOwnProperty(i)) {
+                var color = colors[i]
+                break
+            }
+        }
+        console.log('color', color)
 
         state[us] = {
             x: width / 2, y: height / 2,
             dx: 0, dy: 0,
-            color: colors[numPlayers]
+            color: color
         }
 
         console.log('state', state)
@@ -89,7 +102,7 @@ function startGame(gameRef, us) {
             our.dy += (mouseY - our.y) * attractionDamping
 
             // Clear screen.
-            g.fillStyle = '#000'
+            g.fillStyle = 'black'
             g.fillRect(0, 0, width, height)
 
             // For each player:
@@ -131,10 +144,8 @@ function startGame(gameRef, us) {
                                     p.y < o.y + size && p.y + size > o.y) {
                                     // Crazy/stupid collision handling!
                                     var k = 1 + 2*Math.random()
-                                    state[player].dx *= -k
-                                    state[player].dy *= -k
-                                    state[otherPlayer].dx *= -k
-                                    state[otherPlayer].dy *= -k
+                                    p.dx *= -k; p.dy *= -k
+                                    o.dx *= -k; o.dy *= -k
 
                                     // Immediately publish states when two players collide.
                                     gameRef.child(player).set(state[player])
@@ -145,7 +156,7 @@ function startGame(gameRef, us) {
                     }
                 }
             }
-        }, 1000 / fps)
+        }, frameDelay)
 
         setInterval(function() {
             // Publish our current state every once in a while so that other
