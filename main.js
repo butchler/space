@@ -1,12 +1,12 @@
 // Constants
-var width = 800, height = 400    // Canvas size.
+var width = 700, height = 500    // Canvas size.
 var size = 20                    // Player size.
 var attractionDamping = 0.001    // Constant of proportionality for mouse attraction.
 var drag = 0.99                  // Drag from "air friction" (I thought we were in space?)
 var friction = 0.5               // "Friction" from hitting a wall.
 var boost = 5                    // Speed you receive when you "boost".
 var fps = 60                     // Frames per second.
-var networkDelay = 300           // Milliseconds between network updates.
+var networkDelay = 1000           // Milliseconds between network updates.
 var frameDelay = 1000 / fps
 
 // Connect to Firebase.
@@ -22,12 +22,12 @@ function makeGame() {
     joinGame(root.child('games').push().name())
 }
 
-function joinGame(id) {
-    var gameRef = root.child('games').child(id)
+function joinGame(gameId) {
+    var gameRef = root.child('games').child(gameId)
     var playerId = gameRef.push().name()
     startGame(gameRef, playerId)
 
-    console.log('joinGame', id, playerId)
+    console.log('joinGame', gameId, playerId)
 }
 
 // Get the initial game state and add ourselves to it.
@@ -65,6 +65,7 @@ function initPlayerState(gameRef, us, doneCallback) {
         state[us] = {
             x: width / 2, y: height / 2,
             dx: 0, dy: 0,
+            mouseX: width / 2, mouseY: height / 2,
             color: color
         }
 
@@ -81,6 +82,12 @@ function initPlayerState(gameRef, us, doneCallback) {
 }
 
 function movePlayer(player) {
+    // Move ourself towards the mouse in proportion to how far away they
+    // are from the mouse (the farther we are from the mouse, the faster we
+    // move towards it).
+    player.dx += (player.mouseX - player.x) * attractionDamping
+    player.dy += (player.mouseY - player.y) * attractionDamping
+
     // Move player.
     player.x += player.dx
     player.y += player.dy
@@ -107,25 +114,20 @@ function drawPlayer(player) {
 function startGame(gameRef, us) {
     console.log('startGame', gameRef.toString(), us)
 
-    var host = us
+    var host
     gameRef.on('child_added', function(childSnapshot, prevChildName) {
         var isFirstChild = prevChildName === null
-        if (isFirstChild)
+        if (isFirstChild) {
             host = childSnapshot.name()
+            console.log('new host', host)
+        }
     })
 
     initPlayerState(gameRef, us, function(state) {
-        var mouseX = width / 2, mouseY = height / 2
+        var our = state[us]
 
         // Every frame:
         setInterval(function() {
-            // Move ourself towards the mouse in proportion to how far away they
-            // are from the mouse (the farther we are from the mouse, the faster we
-            // move towards it).
-            var our = state[us]
-            our.dx += (mouseX - our.x) * attractionDamping
-            our.dy += (mouseY - our.y) * attractionDamping
-
             // Clear screen.
             g.fillStyle = 'black'
             g.fillRect(0, 0, width, height)
@@ -156,6 +158,7 @@ function startGame(gameRef, us) {
                                     o.dx *= -k; o.dy *= -k
 
                                     // Immediately publish states when two players collide.
+                                    // TODO: Use update instead of set so that only one network update is sent.
                                     gameRef.child(player).set(p)
                                     gameRef.child(otherPlayer).set(o)
                                 }
@@ -173,43 +176,76 @@ function startGame(gameRef, us) {
         }, networkDelay)
 
         // When the other players publish their states, copy it into our state.
-        gameRef.on('value', function(snapshot) {
-            if (snapshot.val() !== null) {
-                //ourState = state[us]
-                state = snapshot.val()
-                //state[us] = ourState
+        var lastUpdate, total = count = 0
+        gameRef.on('child_added', function(childSnapshot, prevChildName) {
+            var player = childSnapshot.name()
 
-                // Do client side prediction here.
-                // var numFrames = networkDelay / frameDelay
-                // if (large enough difference in local and remote state)
-                //     simulate numFrames frames for the client's player
-                var numFrames = networkDelay / frameDelay / 2
-                for (var i = 0; i < numFrames; i++) {
-                    for (player in state) {
-                        if (state.hasOwnProperty(player)) {
-                            movePlayer(state[player])
-                        }
-                    }
-                }
+            if (player === us)
+                // Ignore local updates.
+                return
+
+            var playerState = childSnapshot.val()
+            state[player] = playerState
+
+            lastUpdate = Date.now()
+
+            console.log(state[player].color, 'player added')
+        })
+        gameRef.on('child_changed', function(childSnapshot, prevChildName) {
+            var player = childSnapshot.name()
+
+            if (player === us)
+                // Ignore local updates.
+                return
+
+            var newPlayerState = childSnapshot.val()
+            state[player] = newPlayerState
+
+            // Do client-side prediction. Players send their updated state out
+            // every networkDelay milliseconds, but by the time that update
+            // reaches us, we will already be a couple of milliseconds in the
+            // future, so we need to update the players state by a couple of frames.
+
+            // Find the recent average network delay.
+            var delay = Date.now() - lastUpdate
+            lastUpdate = Date.now()
+            total += delay
+            count += 1
+            var averageDelay = total / count
+            if (count > 50) {
+                total -= averageDelay
+                count -= 1
             }
+
+            var numFrames = (averageDelay / 2) / frameDelay
+            numFrames = 0
+            console.log(numFrames)
+            for (var i = 0; i < numFrames; i++) {
+                movePlayer(state[player])
+            }
+        })
+        gameRef.on('child_removed', function(oldChildSnapshot) {
+            var player = oldChildSnapshot.name()
+            console.log(state[player].color, 'player removed')
+            delete state[player]
         })
 
         gameRef.child(us).onDisconnect().remove()
 
         canvas.onmousemove = function(e) {
             // Keep track of the mouse position.
-            mouseX = e.pageX - canvas.offsetLeft
-            mouseY = e.pageY - canvas.offsetTop
+            our.mouseX = e.pageX - canvas.offsetLeft
+            our.mouseY = e.pageY - canvas.offsetTop
         }
         document.onkeypress = function(e) {
             // Pressing one of the directional keys "boosts" the player by giving
             // it a constant speed in that direction, instantly nullifying its
             // previous speed in that direction.
             var key = String.fromCharCode(e.which)
-            if (key === "w" || key === "W") state[us].dy = -boost
-            else if (key === "a" || key === "A") state[us].dx = -boost
-            else if (key === "s" || key === "S") state[us].dy = boost
-            else if (key === "d" || key === "D") state[us].dx = boost
+            if (key === "w" || key === "W") our.dy = -boost
+            else if (key === "a" || key === "A") our.dx = -boost
+            else if (key === "s" || key === "S") our.dy = boost
+            else if (key === "d" || key === "D") our.dx = boost
         }
     })
 }
