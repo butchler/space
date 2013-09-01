@@ -20,3 +20,4 @@
   model, but rather than ensuring that there are never any conflicts by waiting
   for each users input before calculating next frame, it allows conflicts but
   handles them by looking at what most of the players think happened.
+* Try using transactions to update positions to avoid collision handling problems.

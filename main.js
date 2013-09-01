@@ -165,14 +165,22 @@ function handleCollisions(gameRef, state) {
                         // TODO: Use update instead of set so that only one network update is sent.
                         newStates = {}
                         newStates[player] = p
-                        newStates[player].overwrite = true
+                        newStates[player].overwriteLocal = true
                         newStates[otherPlayer] = o
-                        newStates[otherPlayer].overwrite = true
+                        newStates[otherPlayer].overwriteLocal = true
                         gameRef.update(newStates)
                     }
                 }
             }
         }
+    }
+}
+
+function catchUp(state, player) {
+    var numFrames = (networkDelay / 2) / frameDelay
+    for (var i = 0; i < numFrames; i++) {
+        movePlayer(state[player])
+        // TODO: If we are host, handle collisions?
     }
 }
 
@@ -215,7 +223,21 @@ function startGame(gameRef, us) {
 
         // Publish our current state every once in a while so that other
         // players can see it.
-        setInterval(function() { gameRef.child(us).set(state[us]) }, networkDelay)
+        //setInterval(function() { gameRef.child(us).set(state[us]) }, networkDelay)
+        setInterval(function() {
+            gameRef.child(us).transaction(function(remoteState) {
+                /*if (remoteState.overwrite)
+                    return
+                return state[us]*/
+                if (remoteState.overwriteLocal) {
+                    our = state[us] = remoteState
+                    delete our.overwriteLocal
+                    catchUp(state, us)
+                }
+
+                return state[us]
+            })
+        }, networkDelay)
 
         // When the other players publish their states, copy it into our state.
         gameRef.on('child_added', function(childSnapshot, prevChildName) {
@@ -234,12 +256,17 @@ function startGame(gameRef, us) {
             var player = childSnapshot.name()
 
             var newPlayerState = childSnapshot.val()
-            if (player !== us || newPlayerState.overwrite) {
+            /*if (player !== us || newPlayerState.overwrite) {
                 state[player] = newPlayerState
                 if (player === us) {
                     our = state[player]
                     delete our.overwrite
+                    gameRef.child(us).set(our)
                 }
+            }*/
+            if (player !== us) {
+                state[player] = newPlayerState
+                catchUp(state, player)
             }
         })
         gameRef.on('child_removed', function(oldChildSnapshot) {
