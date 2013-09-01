@@ -26,17 +26,17 @@ function joinGame(id) {
     gameRef.once('value', function(snapshot) {
         if (snapshot.val() === null) {
             // A game with this id hasn't been made yet, so we get to make it and be the host.
-            startGame(root.child('games').child(id), 'host')
+            startGame(gameRef, 'host')
         } else {
             // Join the game.
-            startGame(gameRef, gameRef.push().name())
+            startGame(gameRef, gameRef.child('states').push().name())
         }
     })
 }
 
 // Get the initial game state and add ourselves to it.
 function initPlayer(gameRef, us, doneCallback) {
-    gameRef.once('value', function(snapshot) {
+    gameRef.child('host-states').once('value', function(snapshot) {
         var state = snapshot.val()
         if (state === null)
             state = {}
@@ -148,8 +148,7 @@ function startGame(gameRef, us) {
                                     o.dx *= -k; o.dy *= -k
 
                                     // Immediately publish states when two players collide.
-                                    gameRef.child(player).set(state[player])
-                                    gameRef.child(otherPlayer).set(state[otherPlayer])
+                                    gameRef.child('host-states').set(state)
                                 }
                             }
                         }
@@ -161,21 +160,41 @@ function startGame(gameRef, us) {
         setInterval(function() {
             // Publish our current state every once in a while so that other
             // players can see it.
-            gameRef.child(us).set(state[us])
+            if (us === 'host')
+                gameRef.child('host-states').set(state)
+            gameRef.child('states').child(us).set(state[us])
         }, networkDelay)
 
         // When the other players publish their states, copy it into our state.
-        gameRef.on('value', function(snapshot) {
+        if (us === 'host')
+            var otherStates = gameRef.child('states')
+        else
+            var otherStates = gameRef.child('host-states')
+        otherStates.on('value', function(snapshot) {
             if (snapshot.val() !== null) {
                 ourState = state[us]
                 state = snapshot.val()
                 state[us] = ourState
+                // Do client side prediction here.
+                // However, rather than overwriting the state, corrections
+                // should only occur if the remote and local states differ
+                // significantly enough, right?
+                // Half wrong. Client side prediction should only be done for
+                // the client, not the other players. However, it should only
+                // be done when there's a significant difference.
+                //
+                // var numFrames = networkDelay / frameDelay
+                // if (large difference in local and remote state)
+                //     simulate numFrames frames for the client's player
             }
         })
 
-        window.onunload = function(e) {
-            gameRef.child(us).remove()
-        }
+        /*window.onunload = function(e) {
+            gameRef.child('states').child(us).remove()
+        }*/
+        gameRef.child('states').child(us).onDisconnect().remove()
+        if (us === 'host')
+            gameRef.child('host-states').onDisconnect().remove()
 
         setInterval(function() { console.log('state', state) }, 10 * 1000)
 
