@@ -6,7 +6,7 @@ var drag = 0.99                  // Drag from "air friction" (I thought we were 
 var friction = 0.5               // "Friction" from hitting a wall.
 var boost = 5                    // Speed you receive when you "boost".
 var fps = 60                     // Frames per second.
-var networkDelay = 200           // Milliseconds between network updates.
+var networkDelay = 100           // Milliseconds between network updates.
 var frameDelay = 1000 / fps
 
 // Connect to Firebase.
